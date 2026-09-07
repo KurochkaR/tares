@@ -9,8 +9,7 @@ import type { ConnectorSpec, Project, Template } from "../types";
 // the cell has no project of the user's own; the seeded demo does not count.
 //
 // It is a conversation that has not started yet, not a form. As the user types, the screen
-// answers: the connectors they name light up under the box, and the starter sentences reorder to the
-// closest ones. Nothing here asks the user to know
+// answers: the connectors they name light up under the box. Nothing here asks the user to know
 // a source from a view. Three doors, one builder: describe it, paste your last incident, or
 // start the demo. Templates live behind the sentences; the gallery stays one click away under
 // Projects for people who already know what they want.
@@ -44,17 +43,7 @@ const COMMON: string[] = [
   "tell me when a city in Germany gets storm winds, from a public weather API",
 ];
 
-// Words every goal shares are not a match: only the nouns of their world count.
-const STOP = new Set(["the", "and", "when", "with", "that", "this", "from", "into", "what", "your", "my", "an", "a", "to", "of", "on", "in", "it", "is", "me", "for", "one", "watch", "agent", "tell", "wake", "show", "its", "something", "every", "each"]);
-const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w)));
 
-/** How many of the typed words a sentence shares; the sentences reorder by it while typing. */
-function overlap(typed: Set<string>, sentence: string) {
-  if (!typed.size) return 0;
-  let n = 0;
-  for (const w of words(sentence)) if (typed.has(w)) n++;
-  return n;
-}
 
 /** Create new (/projects/new): the landing screen loading its own data. */
 export function ProjectNewPage() {
@@ -75,7 +64,6 @@ export default function Landing({ templates, projects }: { templates: Template[]
   useEffect(() => { api.connectors().then(setSpecs).catch(() => {}); }, []);
   useEffect(() => { box.current?.focus(); }, []);
 
-  const typed = useMemo(() => words(goal), [goal]);
   // what the screen heard: installed connectors the words point at, and where the finding goes
   const heard = useMemo(() => {
     const out: string[] = [];
@@ -84,13 +72,14 @@ export default function Landing({ templates, projects }: { templates: Template[]
   }, [goal, specs]);
   const delivery = useMemo(() => DELIVERY.filter(([re]) => re.test(goal)).map(([, d]) => d), [goal]);
 
+  // A fixed list, in a fixed order. It used to reorder by overlap with the typed words, which
+  // moved the row the user had just clicked; the sentence is already in the box, that is enough.
   const sentences = useMemo(() => {
     const fromTemplates = templates.filter((t) => t.sentence).map((t) => ({ text: t.sentence!, template: t.key }));
-    const all = [...fromTemplates, ...COMMON.map((text) => ({ text, template: "" }))];
-    // one shared word is noise ("service" matches almost anything); two is a real neighbour
-    return all.map((s, i) => { const n = overlap(typed, s.text); return { ...s, i, score: n >= 2 ? n : 0 }; })
-      .sort((a, b) => b.score - a.score || a.i - b.i);
-  }, [templates, typed]);
+    return [...fromTemplates, ...COMMON.map((text) => ({ text, template: "" }))];
+  }, [templates]);
+  // the starter whose sentence is in the box, unedited: shown as the one picked
+  const selected = sentences.find((x) => x.text === goal.trim())?.text ?? "";
 
   const demo = projects.find((p) => p.template === "ai_sre_demo");
   const demoTemplate = templates.find((t) => t.key === "ai_sre_demo");
@@ -147,12 +136,14 @@ export default function Landing({ templates, projects }: { templates: Template[]
         <div className="landing-heard">
           {heard.map((k) => <span key={k} className="chip">{specs[k]?.label ?? k}</span>)}
           {delivery.map((d) => <span key={d} className="chip lbl">finding to {d}</span>)}
-          {goal.trim() && heard.length === 0 && (
+          {/* the nudge is for typed text; a picked starter is our sentence, and the row must
+              not grow a second line under it and shift the list the user is clicking in */}
+          {goal.trim() && heard.length === 0 && !selected && (
             <span className="help">say where it runs: a container, a Prometheus URL, a repo, a table, or an API you can post from</span>
           )}
         </div>
         <div className="btnrow">
-          <button className="primary" disabled={!goal.trim()}>Show me</button>
+          <button className="primary cta" disabled={!goal.trim()}>Build it</button>
           {!pasting && (
             <button type="button" className="dim" onClick={() => setPasting(true)}>or paste your last alert or incident thread</button>
           )}
@@ -167,7 +158,7 @@ export default function Landing({ templates, projects }: { templates: Template[]
                     onChange={(e) => setPaste(e.target.value)} />
           <span className="help">It goes to the assistant like any message and is not stored beyond the project's goal.</span>
           <div className="btnrow">
-            <button className="primary" disabled={!paste.trim()}>Show me what would have caught it</button>
+            <button className="primary cta" disabled={!paste.trim()}>Build what would have caught it</button>
             <button type="button" onClick={() => setPasting(false)}>Cancel</button>
           </div>
         </form>
@@ -175,8 +166,12 @@ export default function Landing({ templates, projects }: { templates: Template[]
 
       <div className="landing-starters">
         <div className="help">Or start from one of these</div>
+        {/* A click picks: the sentence lands in the box above, editable, and the row shows as
+            the one picked. Show me (or Enter in the box) is the one way to start; nothing starts
+            on the click alone. */}
         {sentences.map((s) => (
-          <button key={s.text} type="button" className="starter"
+          <button key={s.text} type="button"
+                  className={"starter" + (selected === s.text ? " on" : selected ? " off" : "")}
                   onClick={() => { setGoal(s.text); setPicked(s.template); box.current?.focus(); }}>
             {s.text}
           </button>

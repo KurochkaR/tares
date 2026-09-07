@@ -275,6 +275,18 @@ async def _current_labels(source: str, headers: dict):
         return None
 
 
+async def _trigger_names(headers: dict) -> list | None:
+    """Names of the triggers that exist right now, or None if they can't be read."""
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=headers, base_url=_SELF) as cx:
+            r = await cx.get("/api/triggers")
+        if r.status_code != 200:
+            return None
+        return [t["name"] for t in r.json()]
+    except Exception:
+        return None
+
+
 async def _execute_tool(name: str, args: dict, headers: dict) -> tuple[bool, str]:
     """Run a tool by calling the daemon's own read endpoint. Returns (ok, response text).
 
@@ -421,8 +433,10 @@ every key, filter and field in `source_fields` from real data, exactly as in the
 If no events have arrived yet, say so and ask the user to send some first, or propose from the \
 source's configured fields and say the thresholds are theirs to confirm. Ask about thresholds, \
 windows and which conditions matter before proposing them unless the user already said.
-· AGENT: one propose_agent card. The prompt is the substance, and it is the user's: before you \
-write it, ask what the agent should do when the trigger fires (what to look at, what a useful \
+· AGENT: one propose_agent card. Its `trigger` is one of the triggers the console lists as \
+created; never invent a name. If it lists none, say the agent needs a trigger to wake it and \
+that the Views and triggers step is where to make one; propose nothing. The prompt is the \
+substance, and it is the user's: before you write it, ask what the agent should do when the trigger fires (what to look at, what a useful \
 finding says, what it should recommend or decide, any thresholds or vocabulary they use), unless \
 the goal already says. Write the prompt from their answer, in their terms. For delivery, pick \
 "slack" when the user mentioned Slack, "webhook" when they named a system or URL to post into, \
@@ -538,6 +552,25 @@ async def _run_agent(anthropic_headers: dict, messages: list, model, self_header
                                                        "set; no card was shown. Tell the user its "
                                                        "labels already look right; propose only "
                                                        "changes."})
+                            continue
+                    # An agent card names the trigger that wakes it, and the form submits that
+                    # name as is: a made-up one is a 400 the user cannot get past (the weather
+                    # build on 2026-09-07, no trigger existed and the model invented one). Refuse
+                    # here, with the real list, so the model corrects itself or says so.
+                    if tu.name == "propose_agent":
+                        have = await _trigger_names(headers)
+                        want = str(tu.input.get("trigger", ""))
+                        if have is not None and want not in have:
+                            results.append({"type": "tool_result", "tool_use_id": tu.id,
+                                            "content": (f"no trigger named {want!r} exists, so no card "
+                                                        f"was shown. Triggers that exist: "
+                                                        f"{', '.join(have)}. Propose again with one of "
+                                                        "them.") if have else
+                                                       (f"no trigger named {want!r} exists; this cell "
+                                                        "has no triggers at all, so no card was shown. "
+                                                        "Tell the user the agent needs a trigger to "
+                                                        "wake it, made on the Views and triggers step, "
+                                                        "and propose nothing.")})
                             continue
                     # a proposal is a card for the user, not a server-side action
                     kind = _PROPOSAL_KIND[tu.name]

@@ -98,7 +98,7 @@ export default function Home() {
           reason is said out loud here. See the rule in components/bits.tsx. */}
       {sourcesError && <ErrorState error={sourcesError} what="the source list" />}
 
-      {uc && uc.projects.length > 0 && <ProjectsPanel projects={uc.projects} />}
+      {uc && <ProjectsPanel projects={uc.projects} />}
 
       <ModelSpendPanel usage={mu} error={muError} reload={reloadMu} />
 
@@ -256,9 +256,15 @@ function ProjectsPanel({ projects }: { projects: Project[] }) {
     <div className="panel">
       <div className="pagehead" style={{ marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Projects</h2>
-        <Link className="btn" to="/projects">All projects</Link>
+        <div className="btnrow">
+          <Link className="btn primary" to="/projects/new">Create new</Link>
+          <Link className="btn" to="/projects">All projects</Link>
+        </div>
       </div>
-      <table>
+      {projects.length === 0 && (
+        <div className="empty">no projects yet</div>
+      )}
+      {projects.length > 0 && <table>
         <tbody>
           {projects.map((u) => {
             const missing = u.objects.filter((o) => o.missing).length;
@@ -275,7 +281,7 @@ function ProjectsPanel({ projects }: { projects: Project[] }) {
             );
           })}
         </tbody>
-      </table>
+      </table>}
     </div>
   );
 }
