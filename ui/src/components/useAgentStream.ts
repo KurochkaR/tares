@@ -24,6 +24,22 @@ export type SendOptions = {
   step?: "sources" | "watch" | "agent";
 };
 
+/** A non-200 reply as one readable line. The daemon answers with JSON `{detail}`; anything
+ *  else (an nginx 502 page, an empty body) is a proxy or network failure, and its HTML is
+ *  not something to show the user. */
+async function httpErrorDetail(res: Response): Promise<string> {
+  const body = await res.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed.detail === "string") return parsed.detail;
+  } catch { /* not JSON */ }
+  const status = `${res.status} ${res.statusText}`.trim();
+  if (res.status >= 500 || !body.trim() || /<html/i.test(body)) {
+    return `the server returned ${status}; try sending again`;
+  }
+  return body.slice(0, 300);
+}
+
 export function useAgentStream() {
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -48,7 +64,7 @@ export function useAgentStream() {
         body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
-        onEvent({ type: "error", detail: await res.text().catch(() => res.statusText) });
+        onEvent({ type: "error", detail: await httpErrorDetail(res) });
         return;
       }
       const reader = res.body.getReader();
