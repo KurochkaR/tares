@@ -258,6 +258,18 @@ export default function ProjectNewAssist() {
     }
   }, [ready, already]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sources of this build with no events yet: on the watch step the model has nothing to ground
+  // a view or trigger in, and the page says so instead of leaving the user with a silent step.
+  const [quiet, setQuiet] = useState<string[]>([]);
+  useEffect(() => {
+    if (step !== "watch" || streaming) return;
+    let live = true;
+    Promise.all(created("source").map((n) =>
+      api.sourceFields(n).then((f) => (f.sampled === 0 ? n : null)).catch(() => null)))
+      .then((r) => { if (live) setQuiet(r.filter((n): n is string => n !== null)); });
+    return () => { live = false; };
+  }, [step, streaming]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // the template behind a finished template project, for its setup steps on Done
   const [finishedTemplate, setFinishedTemplate] = useState<Template>();
 
@@ -318,6 +330,13 @@ export default function ProjectNewAssist() {
     ? states[step].turns.flatMap((t) => t.parts).filter((p): p is { type: "proposal"; proposal: Proposal } =>
         p.type === "proposal" && !decisions[p.proposal.id]).length
     : 0;
+  /** Why Continue is held on this step, or undefined when it may go on. Each step needs the
+   *  object the next one builds on: a source to watch, a trigger to wake the agent. */
+  const held = (k: StepKey): string | undefined => {
+    if (k === "sources" && created("source").length === 0) return "connect at least one source first";
+    if (k === "watch" && created("trigger").length === 0) return "create a trigger first; the agent needs one to wake it";
+    return undefined;
+  };
   const proposalsInStep = step !== "describe" && step !== "done"
     ? states[step].turns.flatMap((t) => t.parts).filter((p) => p.type === "proposal").length
     : 0;
@@ -425,6 +444,16 @@ export default function ProjectNewAssist() {
                 : <>Nothing was proposed for this step. Ask for what you have in mind below, or continue.</>}
             </div>
           )}
+          {s.key === step && s.key === "watch" && quiet.length > 0 && !streaming && (
+            <div className="alert">
+              {quiet.length === 1 ? <>Source <span className="mono">{quiet[0]}</span> has</> : <>Sources <span className="mono">{quiet.join(", ")}</span> have</>}{" "}
+              no events yet. Views and triggers are proposed from real events, so send one first
+              (the ingest URL is on the source page), then ask again below.
+            </div>
+          )}
+          {s.key === step && s.key === "watch" && created("trigger").length === 0 && !streaming && (
+            <p className="help" style={{ marginTop: 8 }}>The agent step needs a trigger to wake the agent. Create one here first.</p>
+          )}
           {s.key === step && (
             <>
               <div className="builder-refine">
@@ -435,9 +464,8 @@ export default function ProjectNewAssist() {
                 <button type="button" disabled={streaming || !refine.trim()} onClick={sendRefine}>Send</button>
               </div>
               <div className="btnrow" style={{ marginTop: 12 }}>
-                <button className="primary" disabled={streaming || (s.key === "sources" && created("source").length === 0)}
-                        onClick={advance}
-                        title={s.key === "sources" && created("source").length === 0 ? "connect at least one source first" : undefined}>
+                <button className="primary" disabled={streaming || held(s.key) !== undefined}
+                        onClick={advance} title={held(s.key)}>
                   {NEXT[s.key] === "done" ? "Finish" : `Continue to ${STEPS[i + 1].label.toLowerCase()}`}
                   {pending > 0 ? ` (${pending} undecided)` : ""}
                 </button>
@@ -801,28 +829,33 @@ function AgentCard({ proposal: p, triggers, decision, decide, own }: CardCommon 
     api.triggers().then((ts) => setAllTriggers(ts.map((t) => t.name))).catch(() => setAllTriggers(triggers));
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const open = !decision || decision.status === "error";
+  const triggerNames = [...new Set([...(allTriggers ?? []), ...triggers])];
+  // a trigger the model named but that does not exist is not prefilled: the form would submit
+  // it as is and the daemon would refuse it every time
+  const known = triggerNames.includes(p.trigger);
   const initial: BuiltinAgent = {
-    name: p.name, trigger: p.trigger, prompt: p.prompt, enabled: false, slack_configured: false,
+    name: p.name, trigger: known ? p.trigger : "", prompt: p.prompt, enabled: false, slack_configured: false,
     model: p.model ?? "", slack_channel: "",
     webhook_url: p.delivery.kind === "webhook" ? (p.delivery.url ?? "") : "", webhook_token_configured: false,
     mcp_servers: [], max_rounds: p.max_rounds ?? null, budget_usd: p.budget_usd ?? null,
     effective_max_rounds: p.max_rounds ?? 6,
   };
-  const open = !decision || decision.status === "error";
-  const triggerNames = [...new Set([...(allTriggers ?? []), ...triggers])];
   return (
     <ProposalShell title={proposalTitle(p)} decision={decision} reasoning={p.reasoning}
                    actions={open ? <div className="btnrow"><button onClick={() => decide(p.id, "skipped")}>Skip</button></div> : null}>
       <ProposalBody proposal={p} />
       {note && <div className="alert">{note}</div>}
-      {open && !triggerNames.includes(p.trigger) && (
+      {open && allTriggers && !known && (
         <div className="alert">
-          The proposed trigger <span className="mono">{p.trigger}</span> does not exist; pick one of yours in the form.
+          {triggerNames.length > 0
+            ? <>The proposed trigger <span className="mono">{p.trigger}</span> does not exist; pick one of yours in the form.</>
+            : <>This project has no trigger yet, and an agent needs one to wake it. Go back to Views and triggers and create one first.</>}
         </div>
       )}
       {open && bundle && allTriggers && (
         <AgentForm prefill deliveryKind={p.delivery.kind} initial={initial}
-                   presetTrigger={triggerNames.includes(p.trigger) ? p.trigger : undefined}
+                   presetTrigger={known ? p.trigger : undefined}
                    triggers={triggerNames} presets={bundle.presets} models={bundle.models}
                    defaultModel={bundle.default_model} slackWorkspace={bundle.slack_workspace}
                    defaultMaxRounds={bundle.default_max_rounds} defaultMaxRoundsWithMcp={bundle.default_max_rounds_with_mcp}
