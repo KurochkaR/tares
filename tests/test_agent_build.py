@@ -93,7 +93,8 @@ ck("build prompt is the ask prompt plus the build section",
    build.startswith(base) and "BUILD MODE" in build)
 for marker in ("ASK BEFORE YOU GUESS", "INSTALLED connectors", "`needs`", "source_fields",
                "One card per object", "propose NOTHING in that turn",
-               "ask what the agent should do", "delivery.url", "TEMPLATES FIRST"):
+               "ask what the agent should do", "delivery.url", "TEMPLATES FIRST",
+               "never invent a name"):
     ck(f"build prompt says: {marker}", marker in build)
 
 
@@ -109,6 +110,16 @@ async def main():
         ck("build turn without a key -> 400 (same gate as Ask)", r.status_code == 400, r.text)
         r = await cx.post("/api/agent/chat", json={"messages": [{"role": "user", "content": "hi"}]})
         ck("ask turn without a key -> 400", r.status_code == 400, r.text)
+        print("== agent proposal names a real trigger ==")
+        # the guard reads the daemon's trigger list; with none, every name is unknown
+        agent._SELF = "http://t"
+        real_client = httpx.AsyncClient
+        httpx.AsyncClient = lambda **kw: real_client(transport=httpx.ASGITransport(app=app), **{k: v for k, v in kw.items() if k != "base_url"}, base_url=kw.get("base_url", "http://t"))
+        try:
+            have = await agent._trigger_names({})
+        finally:
+            httpx.AsyncClient = real_client
+        ck("no triggers on a fresh cell -> empty list, not None", have == [], repr(have))
         await cx.aclose()
     print(f"\n{P} passed, {F} failed")
     raise SystemExit(1 if F else 0)

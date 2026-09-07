@@ -3,6 +3,33 @@
 Notable changes to Tares (formerly NavFlow). Format follows [Keep a Changelog](https://keepachangelog.com/);
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.26.0] - 2026-09-07
+
+### Added
+- The running builder is two columns that fill the window: the conversation on the left with
+  the answer box pinned under it, and a "To do" column on the right holding every card the
+  assistant proposed, in order. A decided card folds to one line; the pointer the chat leaves
+  for each card opens it. A one-line head carries the steps, the project name and the goal.
+- Overview shows the Projects panel with a Create new button also on an instance with no
+  project yet.
+
+### Changed
+- The builder no longer invents a trigger for the agent. The daemon refuses an agent proposal
+  whose trigger does not exist and hands the model the real list; Continue on the views and
+  triggers step waits until a trigger exists; the step names sources that have no events yet,
+  since views and triggers are grounded in real events; the agent card never prefills an
+  unknown trigger.
+- Landing: the starter sentences keep a fixed order instead of reordering while you type, the
+  picked one is marked, and the call to action reads "Build it".
+- The assistant shows a readable line for a non-JSON error reply (a proxy's 502 page) instead of
+  its HTML.
+
+### Fixed
+- Behind an nginx ingress, a builder step sent about five seconds after the previous one could
+  fail with 502 "upstream prematurely closed connection": the proxy reused a pooled connection
+  uvicorn was closing at that moment, and does not retry a POST. The daemon now keeps idle
+  connections for 75 seconds, longer than the proxy's pool.
+
 ## [1.25.0] - 2026-09-04
 
 ### Added
