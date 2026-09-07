@@ -256,7 +256,10 @@ function ProjectsPanel({ projects }: { projects: Project[] }) {
     <div className="panel">
       <div className="pagehead" style={{ marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Projects</h2>
-        <Link className="btn" to="/projects">All projects</Link>
+        <div className="btnrow">
+          <Link className="btn primary" to="/projects/new">Create new</Link>
+          <Link className="btn" to="/projects">All projects</Link>
+        </div>
       </div>
       <table>
         <tbody>
