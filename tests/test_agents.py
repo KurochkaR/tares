@@ -14,7 +14,7 @@ import httpx
 P = F = 0
 def ck(l, c, d=""):
     global P, F; P += 1 if c else 0; F += 0 if c else 1
-    print(("  ok   " if c else "  FAIL ") + l + (f"  {d}"))
+    print(("  ok   " if c else "  FAIL ") + l + ("" if c else f"  {d}"))
 
 def start_daemon(env):
     proc = subprocess.Popen([sys.executable, "-c", "from tares.cli import run_daemon; run_daemon()"],
@@ -103,7 +103,7 @@ async def main():
         async with httpx.AsyncClient(timeout=20) as cx:
             # ── the token and key: env-provided, token WINS over the key ────────────────────────
             k = (await cx.get(f"{B}/api/settings/anthropic-key")).json()
-            ck("key reported configured from env", k["configured"] and k["source"].startswith("env:"), str(k))
+            ck("key reported configured from env", k["configured"] and k["source"].startswith("env:ANTHROPIC_AUTH_TOKEN"), str(k))
         proc.terminate()
         proc.wait(timeout=5)
         env.pop("ANTHROPIC_AUTH_TOKEN", None)
@@ -114,9 +114,8 @@ async def main():
         async with httpx.AsyncClient(timeout=20) as cx:
             # ── the key: env-provided, never returned ────────────────────────
             k = (await cx.get(f"{B}/api/settings/anthropic-key")).json()
-            ck("key reported configured from env", k["configured"] and k["source"].startswith("env:"), str(k))
+            ck("key reported configured from env", k["configured"] and k["source"].startswith("env:ANTHROPIC_API_KEY"), str(k))
             ck("key value is never returned", "sk-test" not in json.dumps(k), str(k))
-            input()
 
             # ── precedence: a stored key WINS over the env key (trial cells depend on it) ──
             r = await cx.put(f"{B}/api/settings/anthropic-key", json={"key": "sk-user-own"})

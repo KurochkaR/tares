@@ -453,7 +453,7 @@ const fmtMs = (ms: number) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)
 /** The key is stored on the SERVER, under Settings — the same one Slack and trigger-woken agents
  *  resolve. It used to live in this browser's localStorage and ride along as a header, so a key
  *  added here made Ask work while Slack still reported no key configured (NF-125). */
-export function KeySetup({ onSaved, urlConfigured }: { onSaved: () => void, urlConfigured: boolean | undefined }) {
+export function KeySetup({ onSaved, urlConfigured }: { onSaved: () => void, urlConfigured?: boolean | undefined }) {
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string>();
   const [saving, setSaving] = useState(false);

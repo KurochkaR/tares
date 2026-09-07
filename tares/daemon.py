@@ -75,7 +75,8 @@ LOGIN_URL = os.getenv("TARES_LOGIN_URL", "").strip()
 # self-host: no link. Public, non-secret, surfaced on /health next to login_url.
 WORKSPACE_URL = os.getenv("TARES_WORKSPACE_URL", "").strip()
 # The Anthropic key for the in-app Ask agent (and Tares agents) is resolved at request time via
-# resolve_anthropic_headers(store): the console-stored key, else env ANTHROPIC_API_KEY.
+# resolve_anthropic_headers(store): Resolve headers from the console-stored key,
+# then ANTHROPIC_AUTH_TOKEN, then ANTHROPIC_API_KEY.
 # Never returned by any API — capabilities exposes only a boolean.
 # The Slack bot token behind the slack:// dispatch sink keeps the OPPOSITE order via
 # resolve_slack_token(store): env TARES_SLACK_BOT_TOKEN wins over the console-stored value
@@ -1702,7 +1703,7 @@ def make_app() -> FastAPI:
         """Tares agent definitions plus the state the UI needs to explain why one isn't running:
         no key configured is the common case on a fresh install and looks identical to "disabled"
         without this."""
-        key, origin = resolve_anthropic_headers(store)
+        headers, origin = resolve_anthropic_headers(store)
         stats = store.agent_stats()
         zero = {"runs": 0, "ok": 0, "finished": 0, "avg_duration_ms": None,
                 "cost_usd": None, "input_tokens": 0, "output_tokens": 0, "uncosted_runs": 0}
@@ -1723,7 +1724,7 @@ def make_app() -> FastAPI:
                          "enabled": _agent_enabled(a["name"]), "updated_at": a.get("updated_at"),
                          "owned_by": a.get("owned_by"), "customized": bool(a.get("customized")),
                          "last_run": runs[0] if runs else None})
-        return {"agents": rows, "key_configured": bool(key), "key_source": origin,
+        return {"agents": rows, "key_configured": bool(headers), "key_source": origin,
                 "models": AGENT_MODELS, "default_model": AGENT_DEFAULT_MODEL,
                 "default_max_rounds": AGENT_MAX_ROUNDS,
                 "default_max_rounds_with_mcp": AGENT_MAX_ROUNDS_WITH_MCP,
@@ -1791,8 +1792,8 @@ def make_app() -> FastAPI:
         agent = store.get_catalog_agent(name)
         if agent is None:
             _err(KeyError(f"unknown agent {name!r}"), 404)
-        key, _ = resolve_anthropic_headers(store)
-        if not key:
+        headers, _ = resolve_anthropic_headers(store)
+        if not headers:
             _err(ValueError("no Anthropic key configured; set ANTHROPIC_API_KEY or add one "
                             "under Settings before enabling an agent"))
         # enable = subscribe to the trigger (the same wiring an external agent has). Idempotent.
@@ -1851,8 +1852,8 @@ def make_app() -> FastAPI:
         """Never returns the key — only whether one is resolvable and where it came from. A key
         saved here takes over from the deployment's env key; `env_overrides` is kept for API
         compatibility and can now only be true when no key is stored."""
-        key, origin = resolve_anthropic_headers(store)
-        return {"configured": bool(key), "source": origin,
+        headers, origin = resolve_anthropic_headers(store)
+        return {"configured": bool(headers), "source": origin,
                 "stored": bool(store.get_setting("anthropic_key")),
                 "env_overrides": origin.startswith("env:")}
 
