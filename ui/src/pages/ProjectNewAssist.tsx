@@ -104,6 +104,9 @@ export default function ProjectNewAssist() {
   const [history, setHistory] = useState<WireMessage[]>([]);
   const [refine, setRefine] = useState("");
   const { send, stop, streaming } = useAgentStream();
+  const chatEnd = useRef<HTMLDivElement>(null);
+  // a decided card folds to one line; "show" opens it again, and revealing from the chat too
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   // what this build has made so far; the project is created around the first source
   const [project, setProject] = useState<Project>();
@@ -175,6 +178,7 @@ export default function ProjectNewAssist() {
     setStates((s) => ({ ...s, [stepKey]: { turns: [...s[stepKey].turns, { parts: [] }] } }));
     const mut = (fn: (parts: Part[]) => Part[]) =>
       setStates((s) => ({ ...s, [stepKey]: { turns: s[stepKey].turns.map((t, i) => i === idx ? { parts: fn(t.parts) } : t) } }));
+    chatEnd.current?.scrollIntoView({ block: "nearest" });
     const appendText = (text: string) => mut((parts) => {
       const last = parts[parts.length - 1];
       if (last && last.type === "text") return [...parts.slice(0, -1), { type: "text", text: last.text + text }];
@@ -337,6 +341,15 @@ export default function ProjectNewAssist() {
     if (k === "watch" && created("trigger").length === 0) return "create a trigger first; the agent needs one to wake it";
     return undefined;
   };
+  // every proposal of every step reached, in the order the assistant made them
+  const allProposals = STEPS.filter((_, i) => i <= stepIndex && i < STEPS.length)
+    .flatMap((s) => states[s.key].turns.flatMap((t) => t.parts)
+      .filter((p): p is { type: "proposal"; proposal: Proposal } => p.type === "proposal")
+      .map((p) => ({ p: p.proposal, stepKey: s.key })));
+  const reveal = (id: string) => {
+    setExpanded((x) => ({ ...x, [id]: true }));
+    requestAnimationFrame(() => document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+  };
   const proposalsInStep = step !== "describe" && step !== "done"
     ? states[step].turns.flatMap((t) => t.parts).filter((p) => p.type === "proposal").length
     : 0;
@@ -345,19 +358,23 @@ export default function ProjectNewAssist() {
   const asking = !!lastTurn && !streaming && lastTurn.parts.some((p) => p.type === "text")
     && !lastTurn.parts.some((p) => p.type === "proposal");
 
+  const running = stepIndex >= 0 && step !== "done";
+  const stepsStrip = (
+    <div className="builder-steps">
+      {STEPS.map((s, i) => (
+        <span key={s.key} className={"step" + (i === stepIndex ? " active" : i < stepIndex ? " done" : "") + (i === stepIndex && streaming ? " busy" : "")}>
+          <span className="n">{i + 1}</span>{s.label}
+          {i < stepIndex && s.kinds.some((k) => created(k).length > 0) && (
+            <span className="badge ok">{s.kinds.reduce((n, k) => n + created(k).length, 0)}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
   return (
     <>
-      <PageHead />
-      <div className="builder-steps">
-        {STEPS.map((s, i) => (
-          <span key={s.key} className={"step" + (i === stepIndex ? " active" : i < stepIndex ? " done" : "") + (i === stepIndex && streaming ? " busy" : "")}>
-            <span className="n">{i + 1}</span>{s.label}
-            {i < stepIndex && s.kinds.some((k) => created(k).length > 0) && (
-              <span className="badge ok">{s.kinds.reduce((n, k) => n + created(k).length, 0)}</span>
-            )}
-          </span>
-        ))}
-      </div>
+      {!running && <PageHead />}
+      {!running && stepsStrip}
 
       {/* Describe: the form until the flow starts (and again on Change); a header afterwards */}
       {step === "describe" ? (
@@ -397,7 +414,7 @@ export default function ProjectNewAssist() {
               : <Link className="btn" to="/projects/new">Cancel</Link>}
           </div>
         </div>
-      ) : (
+      ) : running ? null : (
         <div className="panel builder-brief">
           <label className="field" style={{ marginBottom: 10 }}>
             <span className="lbl">project name</span>
@@ -413,13 +430,33 @@ export default function ProjectNewAssist() {
         </div>
       )}
 
-      {projectErr && <div className="alert error">{projectErr}</div>}
+      {!running && projectErr && <div className="alert error">{projectErr}</div>}
 
-      {/* One panel per step reached so far */}
+      {/* The running builder fills the viewport: a one-line head (steps, the brief), then the
+          conversation on the left and everything it proposes on the right as cards to complete
+          or skip, each column scrolling on its own with the answer box pinned under the chat.
+          A decided card folds to one line so the right side is always the work still to do. */}
+      {running && (
+      <div className="builder-run">
+        <div className="builder-head">
+          <h1>Build with Tares</h1>
+          {stepsStrip}
+          <div className="brief" title={goal.trim()}>
+            {project
+              ? <span className="mono">{project.name}</span>
+              : <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} />}
+            <span className="goal">{goal.trim()}</span>
+          </div>
+          <button type="button" onClick={change}>Change what you need</button>
+        </div>
+        {projectErr && <div className="alert error" style={{ margin: "8px 36px 0" }}>{projectErr}</div>}
+      <div className="builder-split">
+      <div className="builder-chat">
+      <div className="builder-log">
       {STEPS.filter((_, i) => i <= stepIndex && i < STEPS.length).map((s, i) => (
-        <div className="panel" key={s.key}>
-          <div className="pagehead" style={{ marginBottom: 8 }}>
-            <h2 style={{ margin: 0 }}>{s.label}</h2>
+        <div className="builder-step" key={s.key}>
+          <div className="pagehead" style={{ marginBottom: 4 }}>
+            <h3 style={{ margin: 0 }}>{s.label}</h3>
             {i < stepIndex && <span className="badge ok">done</span>}
             {s.key === step && streaming && (
               <span className="builder-running">
@@ -429,13 +466,8 @@ export default function ProjectNewAssist() {
             )}
           </div>
           {states[s.key].turns.map((t, j) => (
-            <TurnView key={j} turn={t} decisions={decisions} decide={decide} own={own}
-                      thinking={streaming && s.key === step && j === states[s.key].turns.length - 1 && t.parts.length === 0}
-                      specs={specs ?? {}} existing={existing} refreshSources={refreshSources}
-                      sourceNames={[...new Set([...created("source"), ...existing.map((x) => x.name)])]}
-                      createdTriggers={created("trigger")}
-                      finishWith={finishWith}
-                      active={s.key === step} />
+            <TurnText key={j} turn={t} decisions={decisions} reveal={reveal}
+                      thinking={streaming && s.key === step && j === states[s.key].turns.length - 1 && t.parts.length === 0} />
           ))}
           {s.key === step && !streaming && states[s.key].turns.length > 0 && proposalsInStep === 0 && !asking && (
             <div className="empty">
@@ -454,27 +486,69 @@ export default function ProjectNewAssist() {
           {s.key === step && s.key === "watch" && created("trigger").length === 0 && !streaming && (
             <p className="help" style={{ marginTop: 8 }}>The agent step needs a trigger to wake the agent. Create one here first.</p>
           )}
-          {s.key === step && (
-            <>
-              <div className="builder-refine">
-                <textarea value={refine} rows={asking ? 2 : 1} autoFocus={asking}
-                          placeholder={asking ? "answer here, then Send" : "ask for a change, e.g. use the staging URL, or add the alerts too"}
-                          onChange={(e) => setRefine(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendRefine(); } }} />
-                <button type="button" disabled={streaming || !refine.trim()} onClick={sendRefine}>Send</button>
-              </div>
-              <div className="btnrow" style={{ marginTop: 12 }}>
-                <button className="primary" disabled={streaming || held(s.key) !== undefined}
-                        onClick={advance} title={held(s.key)}>
-                  {NEXT[s.key] === "done" ? "Finish" : `Continue to ${STEPS[i + 1].label.toLowerCase()}`}
-                  {pending > 0 ? ` (${pending} undecided)` : ""}
-                </button>
-                {project && <Link className="btn" to={`/projects/${encodeURIComponent(project.id)}`}>Open the project so far</Link>}
-              </div>
-            </>
-          )}
         </div>
       ))}
+      <div ref={chatEnd} />
+      </div>
+      {((active: StepKey) => (
+        <div className="builder-compose">
+          <div className="builder-refine">
+            <textarea value={refine} rows={asking ? 2 : 1} autoFocus={asking}
+                      placeholder={asking ? "answer here, then Send" : pending > 0 ? "decide the cards on the right, or ask for a change" : "ask for a change, e.g. use the staging URL, or add the alerts too"}
+                      onChange={(e) => setRefine(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendRefine(); } }} />
+            <button type="button" disabled={streaming || !refine.trim()} onClick={sendRefine}>Send</button>
+          </div>
+          <div className="btnrow" style={{ marginTop: 10 }}>
+            <button className="primary" disabled={streaming || held(active) !== undefined}
+                    onClick={advance} title={held(active)}>
+              {NEXT[active] === "done" ? "Finish" : `Continue to ${STEPS[stepIndex + 1].label.toLowerCase()}`}
+              {pending > 0 ? ` (${pending} undecided)` : ""}
+            </button>
+            {project && <Link className="btn" to={`/projects/${encodeURIComponent(project.id)}`}>Open the project so far</Link>}
+          </div>
+        </div>
+      ))(step as StepKey)}
+      </div>
+
+      <div className="builder-actions">
+        <div className="pagehead" style={{ marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>To do</h2>
+          {pending > 0 && <span className="badge paused">{pending} to decide</span>}
+        </div>
+        {allProposals.length === 0 && (
+          <div className="empty">Each source, view, trigger and agent the assistant proposes appears here for you to complete or skip.</div>
+        )}
+        {allProposals.map(({ p, stepKey }) => {
+          const d = decisions[p.id];
+          const folded = !!d && d.status !== "error" && !expanded[p.id];
+          if (folded) {
+            return (
+              <div key={p.id} className="action-folded" id={`card-${p.id}`}>
+                <span className="title">{proposalTitle(p)}</span>
+                {d.status === "applied" ? <span className="badge ok">applied</span> : <span className="badge starting">skipped</span>}
+                <button type="button" className="dim" onClick={() => setExpanded((x) => ({ ...x, [p.id]: true }))}>show</button>
+              </div>
+            );
+          }
+          return (
+            <div key={p.id} id={`card-${p.id}`}>
+              {d && d.status !== "error" && (
+                <div className="btnrow" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+                  <button type="button" className="dim" onClick={() => setExpanded((x) => ({ ...x, [p.id]: false }))}>fold</button>
+                </div>
+              )}
+              <CardFor proposal={p} decision={d} decide={decide} own={own} active={stepKey === step}
+                       specs={specs ?? {}} existing={existing} refreshSources={refreshSources}
+                       sourceNames={[...new Set([...created("source"), ...existing.map((x) => x.name)])]}
+                       createdTriggers={created("trigger")} finishWith={finishWith} />
+            </div>
+          );
+        })}
+      </div>
+      </div>
+      </div>
+      )}
 
       {step === "done" && (
         <div className="panel">
@@ -538,14 +612,10 @@ function PageHead() {
 
 /** One assistant turn inside a step: text, the tool rail, and each proposal as a card the user
  *  completes. Mirrors AskChat's Turn, with forms in place of Apply for sources and agents. */
-function TurnView({ turn, decisions, decide, own, thinking, specs, existing, refreshSources, sourceNames,
-                    createdTriggers, finishWith, active }: {
-  turn: Turn; decisions: DecisionMap; thinking: boolean; active: boolean;
-  decide: (id: string, status: "applied" | "skipped" | "error", detail?: string) => void;
-  own: (kind: ProjectObjectKind, name: string) => Promise<void>;
-  finishWith: (p: Project) => void;
-  specs: Record<string, ConnectorSpec>; existing: Source[]; refreshSources: () => void;
-  sourceNames: string[]; createdTriggers: string[];
+/** One assistant turn as conversation: its text and tool rail, and for each proposal a line
+ *  that points at its card on the right, with where that card stands. */
+function TurnText({ turn, decisions, reveal, thinking }: {
+  turn: Turn; decisions: DecisionMap; thinking: boolean; reveal: (id: string) => void;
 }) {
   const blocks: ({ kind: "tools"; tools: ToolPart[] } | { kind: "part"; part: Part })[] = [];
   for (const p of turn.parts) {
@@ -562,20 +632,34 @@ function TurnView({ turn, decisions, decide, own, thinking, specs, existing, ref
           return <div key={j} className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{b.part.text}</ReactMarkdown></div>;
         if (b.part.type !== "proposal") return null;
         const p = b.part.proposal;
-        const common = { decision: decisions[p.id], decide, own, active };
-        if (p.kind === "source")
-          return <SourceCard key={j} proposal={p} specs={specs} existing={existing} refreshSources={refreshSources} {...common} />;
-        if (p.kind === "agent")
-          return <AgentCard key={j} proposal={p} triggers={createdTriggers} {...common} />;
-        if (p.kind === "project")
-          return <ProjectCard key={j} proposal={p} finishWith={finishWith} {...common} />;
-        return <CatalogCard key={j} proposal={p} sourceNames={sourceNames} {...common} />;
+        const d = decisions[p.id];
+        return (
+          <button key={j} type="button" className={"proposal-ref" + (d ? " " + d.status : "")} onClick={() => reveal(p.id)}>
+            <span>{proposalTitle(p)}</span>
+            <span className="state">{d?.status === "applied" ? "applied" : d?.status === "skipped" ? "skipped" : d?.status === "error" ? "failed" : "to decide"}</span>
+          </button>
+        );
       })}
       {thinking && <div className="dim">thinking…</div>}
     </div>
   );
 }
 
+/** The card for one proposal: the form or the apply card its kind needs. */
+function CardFor({ proposal: p, decision, decide, own, active, specs, existing, refreshSources, sourceNames,
+                   createdTriggers, finishWith }: CardCommon & {
+  proposal: Proposal; specs: Record<string, ConnectorSpec>; existing: Source[]; refreshSources: () => void;
+  sourceNames: string[]; createdTriggers: string[]; finishWith: (p: Project) => void;
+}) {
+  const common = { decision, decide, own, active };
+  if (p.kind === "source")
+    return <SourceCard proposal={p} specs={specs} existing={existing} refreshSources={refreshSources} {...common} />;
+  if (p.kind === "agent")
+    return <AgentCard proposal={p} triggers={createdTriggers} {...common} />;
+  if (p.kind === "project")
+    return <ProjectCard proposal={p} finishWith={finishWith} {...common} />;
+  return <CatalogCard proposal={p} sourceNames={sourceNames} {...common} />;
+}
 type CardCommon = {
   decision?: DecisionMap[string]; active: boolean;
   decide: (id: string, status: "applied" | "skipped" | "error", detail?: string) => void;
